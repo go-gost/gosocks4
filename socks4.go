@@ -4,7 +4,7 @@
 package gosocks4
 
 import (
-	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -34,12 +34,17 @@ const (
 	RejectedUserid = 93
 )
 
+const (
+	maxUseridLen   = 255
+	maxHostnameLen = 255
+)
+
 var (
 	ErrBadVersion      = errors.New("Bad version")
-	ErrBadFormat       = errors.New("Bad format")
 	ErrBadAddrType     = errors.New("Bad address type")
 	ErrShortDataLength = errors.New("Short data length")
 	ErrBadCmd          = errors.New("Bad Command")
+	ErrFieldTooLong    = errors.New("Field too long")
 )
 
 type Addr struct {
@@ -111,72 +116,93 @@ func NewRequest(cmd uint8, addr *Addr, userid []byte) *Request {
 	}
 }
 
+func readCString(r io.Reader, maxLen int) ([]byte, error) {
+	lr := io.LimitReader(r, int64(maxLen+1))
+	var buf bytes.Buffer
+	b := make([]byte, 1)
+	for buf.Len() < maxLen+1 {
+		_, err := io.ReadFull(lr, b)
+		if err != nil {
+			return nil, err
+		}
+		if b[0] == 0 {
+			return buf.Bytes(), nil
+		}
+		buf.WriteByte(b[0])
+	}
+	return nil, ErrFieldTooLong
+}
+
 func ReadRequest(r io.Reader) (*Request, error) {
-	br := bufio.NewReader(r)
-	b, err := br.Peek(8)
-	if err != nil {
+	var hdr [8]byte
+	if _, err := io.ReadFull(r, hdr[:]); err != nil {
 		return nil, err
 	}
 
-	if b[0] != Ver4 {
+	if hdr[0] != Ver4 {
 		return nil, ErrBadVersion
 	}
 
+	switch hdr[1] {
+	case CmdConnect, CmdBind:
+	default:
+		return nil, ErrBadCmd
+	}
+
 	request := &Request{
-		Cmd: b[1],
+		Cmd: hdr[1],
 	}
 
 	addr := &Addr{}
-	if err := addr.Decode(b[2:8]); err != nil {
+	if err := addr.Decode(hdr[2:8]); err != nil {
 		return nil, err
 	}
 	request.Addr = addr
 
-	if _, err := br.Discard(8); err != nil {
-		return nil, err
-	}
-	b, err = br.ReadBytes(0)
+	b, err := readCString(r, maxUseridLen)
 	if err != nil {
 		return nil, err
 	}
-	request.Userid = b[:len(b)-1]
+	request.Userid = b
 
 	if request.Addr.Type == AddrDomain {
-		b, err = br.ReadBytes(0)
+		b, err = readCString(r, maxHostnameLen)
 		if err != nil {
 			return nil, err
 		}
-		request.Addr.Host = string(b[:len(b)-1])
+		request.Addr.Host = string(b)
 	}
 
 	return request, nil
 }
 
 func (r *Request) Write(w io.Writer) (err error) {
-	bw := bufio.NewWriter(w)
-	bw.Write([]byte{Ver4, r.Cmd})
-
 	if r.Addr == nil {
 		return ErrBadAddrType
 	}
+
+	var buf bytes.Buffer
+	buf.WriteByte(Ver4)
+	buf.WriteByte(r.Cmd)
 
 	var b [6]byte
 	if err = r.Addr.Encode(b[:]); err != nil {
 		return
 	}
-	bw.Write(b[:])
+	buf.Write(b[:])
 
 	if len(r.Userid) > 0 {
-		bw.Write(r.Userid)
+		buf.Write(r.Userid)
 	}
-	bw.WriteByte(0)
+	buf.WriteByte(0)
 
 	if r.Addr.Type == AddrDomain {
-		bw.WriteString(r.Addr.Host)
-		bw.WriteByte(0)
+		buf.WriteString(r.Addr.Host)
+		buf.WriteByte(0)
 	}
 
-	return bw.Flush()
+	_, err = w.Write(buf.Bytes())
+	return
 }
 
 func (r *Request) String() string {
