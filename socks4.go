@@ -201,7 +201,7 @@ func (r *Request) Write(w io.Writer) (err error) {
 		buf.WriteByte(0)
 	}
 
-	_, err = w.Write(buf.Bytes())
+	_, err = buf.WriteTo(w)
 	return
 }
 
