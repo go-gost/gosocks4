@@ -7,10 +7,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"strconv"
+	"strings"
 )
 
 const (
@@ -51,6 +51,7 @@ type Addr struct {
 	Type int
 	Host string
 	Port uint16
+	ip4  [4]byte
 }
 
 func (addr *Addr) Decode(b []byte) error {
@@ -60,6 +61,7 @@ func (addr *Addr) Decode(b []byte) error {
 
 	addr.Port = binary.BigEndian.Uint16(b[0:2])
 	addr.Host = net.IP(b[2 : 2+net.IPv4len]).String()
+	copy(addr.ip4[:], b[2:6])
 
 	if b[2]|b[3]|b[4] == 0 && b[5] != 0 {
 		addr.Type = AddrDomain
@@ -77,11 +79,15 @@ func (addr *Addr) Encode(b []byte) error {
 
 	switch addr.Type {
 	case AddrIPv4:
-		ip4 := net.ParseIP(addr.Host).To4()
-		if ip4 == nil {
-			return ErrBadAddrType
+		if ip := addr.ip4; ip[0]|ip[1]|ip[2]|ip[3] != 0 {
+			copy(b[2:], ip[:])
+		} else {
+			ip4 := net.ParseIP(addr.Host).To4()
+			if ip4 == nil {
+				return ErrBadAddrType
+			}
+			copy(b[2:], ip4)
 		}
-		copy(b[2:], ip4)
 	case AddrDomain:
 		ip4 := net.IPv4(0, 0, 0, 1)
 		copy(b[2:], ip4.To4())
@@ -117,18 +123,25 @@ func NewRequest(cmd uint8, addr *Addr, userid []byte) *Request {
 }
 
 func readCString(r io.Reader, maxLen int) ([]byte, error) {
-	lr := io.LimitReader(r, int64(maxLen+1))
-	var buf bytes.Buffer
-	b := make([]byte, 1)
-	for buf.Len() < maxLen+1 {
-		_, err := io.ReadFull(lr, b)
+	var buf [256]byte
+	var b [1]byte
+	for i := 0; i <= maxLen; i++ {
+		_, err := io.ReadFull(r, b[:])
 		if err != nil {
-			return nil, err
+			if i == 0 {
+				return nil, err
+			}
+			return nil, io.ErrUnexpectedEOF
 		}
 		if b[0] == 0 {
-			return buf.Bytes(), nil
+			if i == 0 {
+				return nil, nil
+			}
+			result := make([]byte, i)
+			copy(result, buf[:i])
+			return result, nil
 		}
-		buf.WriteByte(b[0])
+		buf[i] = b[0]
 	}
 	return nil, ErrFieldTooLong
 }
@@ -182,6 +195,11 @@ func (r *Request) Write(w io.Writer) (err error) {
 	}
 
 	var buf bytes.Buffer
+	size := 1 + 1 + 6 + len(r.Userid) + 1 // VN + CD + addr + userid + null
+	if r.Addr.Type == AddrDomain {
+		size += len(r.Addr.Host) + 1 // hostname + null
+	}
+	buf.Grow(size)
 	buf.WriteByte(Ver4)
 	buf.WriteByte(r.Cmd)
 
@@ -210,7 +228,13 @@ func (r *Request) String() string {
 	if addr == nil {
 		addr = &Addr{}
 	}
-	return fmt.Sprintf("%d %d %s", Ver4, r.Cmd, addr.String())
+	var buf strings.Builder
+	buf.Grow(32)
+	buf.WriteString("4 ")
+	buf.WriteByte('0' + byte(r.Cmd))
+	buf.WriteByte(' ')
+	buf.WriteString(addr.String())
+	return buf.String()
 }
 
 /*
@@ -274,5 +298,11 @@ func (r *Reply) String() string {
 	if addr == nil {
 		addr = &Addr{}
 	}
-	return fmt.Sprintf("0 %d %s", r.Code, addr.String())
+	var buf strings.Builder
+	buf.Grow(32)
+	buf.WriteString("0 ")
+	buf.WriteString(strconv.Itoa(int(r.Code)))
+	buf.WriteByte(' ')
+	buf.WriteString(addr.String())
+	return buf.String()
 }

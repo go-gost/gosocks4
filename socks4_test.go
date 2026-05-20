@@ -1038,7 +1038,7 @@ func BenchmarkReadRequest_CONNECT_IPv4(b *testing.B) {
 	data := []byte{4, 1, 0, 80, 127, 0, 0, 1, 'u', 's', 'e', 'r', 0}
 	r := bytes.NewReader(data)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r.Reset(data)
 		ReadRequest(r)
 	}
@@ -1048,7 +1048,17 @@ func BenchmarkReadRequest_SOCKS4A(b *testing.B) {
 	data := []byte{4, 1, 0, 53, 0, 0, 0, 1, 'u', 0, 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm', 0}
 	r := bytes.NewReader(data)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
+		r.Reset(data)
+		ReadRequest(r)
+	}
+}
+
+func BenchmarkReadRequest_BIND(b *testing.B) {
+	data := []byte{4, 2, 0, 80, 10, 0, 0, 1, 'u', 's', 'e', 'r', 0}
+	r := bytes.NewReader(data)
+	b.ResetTimer()
+	for b.Loop() {
 		r.Reset(data)
 		ReadRequest(r)
 	}
@@ -1058,7 +1068,25 @@ func BenchmarkRequestWrite_CONNECT_IPv4(b *testing.B) {
 	addr := &Addr{Type: AddrIPv4, Host: "127.0.0.1", Port: 80}
 	req := NewRequest(CmdConnect, addr, []byte("user"))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
+		req.Write(io.Discard)
+	}
+}
+
+func BenchmarkRequestWrite_CONNECT_Domain(b *testing.B) {
+	addr := &Addr{Type: AddrDomain, Host: "example.com", Port: 53}
+	req := NewRequest(CmdConnect, addr, []byte("u"))
+	b.ResetTimer()
+	for b.Loop() {
+		req.Write(io.Discard)
+	}
+}
+
+func BenchmarkRequestWrite_BIND(b *testing.B) {
+	addr := &Addr{Type: AddrIPv4, Host: "10.0.0.1", Port: 1080}
+	req := NewRequest(CmdBind, addr, []byte("test"))
+	b.ResetTimer()
+	for b.Loop() {
 		req.Write(io.Discard)
 	}
 }
@@ -1067,8 +1095,80 @@ func BenchmarkReadReply(b *testing.B) {
 	data := []byte{0, 90, 0, 80, 127, 0, 0, 1}
 	r := bytes.NewReader(data)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		r.Reset(data)
 		ReadReply(r)
+	}
+}
+
+func BenchmarkReplyWrite(b *testing.B) {
+	addr := &Addr{Type: AddrIPv4, Host: "127.0.0.1", Port: 80}
+	reply := NewReply(Granted, addr)
+	b.ResetTimer()
+	for b.Loop() {
+		reply.Write(io.Discard)
+	}
+}
+
+func BenchmarkAddrDecode(b *testing.B) {
+	data := []byte{0, 80, 127, 0, 0, 1}
+	b.ResetTimer()
+	for b.Loop() {
+		addr := &Addr{}
+		addr.Decode(data)
+	}
+}
+
+func BenchmarkAddrEncode_IPv4(b *testing.B) {
+	addr := &Addr{Type: AddrIPv4, Host: "192.168.1.1", Port: 443}
+	buf := make([]byte, 6)
+	b.ResetTimer()
+	for b.Loop() {
+		addr.Encode(buf)
+	}
+}
+
+func BenchmarkAddrEncode_Domain(b *testing.B) {
+	addr := &Addr{Type: AddrDomain, Host: "example.com", Port: 1080}
+	buf := make([]byte, 6)
+	b.ResetTimer()
+	for b.Loop() {
+		addr.Encode(buf)
+	}
+}
+
+func BenchmarkAddrString(b *testing.B) {
+	addr := &Addr{Host: "10.0.0.1", Port: 3128}
+	b.ResetTimer()
+	for b.Loop() {
+		_ = addr.String()
+	}
+}
+
+func BenchmarkReadCString(b *testing.B) {
+	data := []byte("hello\x00")
+	r := bytes.NewReader(data)
+	b.ResetTimer()
+	for b.Loop() {
+		r.Reset(data)
+		readCString(r, 255)
+	}
+}
+
+func BenchmarkRequestString(b *testing.B) {
+	addr := &Addr{Host: "10.0.0.1", Port: 3128}
+	req := NewRequest(CmdConnect, addr, []byte("user"))
+	b.ResetTimer()
+	for b.Loop() {
+		_ = req.String()
+	}
+}
+
+func BenchmarkReplyString(b *testing.B) {
+	addr := &Addr{Host: "10.0.0.1", Port: 3128}
+	reply := NewReply(Granted, addr)
+	b.ResetTimer()
+	for b.Loop() {
+		_ = reply.String()
 	}
 }
