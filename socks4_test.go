@@ -2,6 +2,7 @@ package gosocks4
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"strings"
@@ -859,6 +860,23 @@ func TestAddrEncode_ZeroBuffer(t *testing.T) {
 	err := addr.Encode(nil)
 	if !errors.Is(err, ErrShortDataLength) {
 		t.Errorf("expected ErrShortDataLength, got %v", err)
+	}
+}
+
+func TestAddrEncode_CachedIP4(t *testing.T) {
+	addr := &Addr{}
+	if err := addr.Decode([]byte{0, 80, 127, 0, 0, 1}); err != nil {
+		t.Fatalf("unexpected decode error: %v", err)
+	}
+	b := make([]byte, 6)
+	if err := addr.Encode(b); err != nil {
+		t.Fatalf("unexpected encode error: %v", err)
+	}
+	if b[2] != 127 || b[3] != 0 || b[4] != 0 || b[5] != 1 {
+		t.Errorf("expected 127.0.0.1 from cache, got %d.%d.%d.%d", b[2], b[3], b[4], b[5])
+	}
+	if b[0] != 0 || b[1] != 80 {
+		t.Errorf("expected port 80, got %d", binary.BigEndian.Uint16(b[0:2]))
 	}
 }
 

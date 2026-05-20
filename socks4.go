@@ -166,11 +166,8 @@ func ReadRequest(r io.Reader) (*Request, error) {
 		Cmd: hdr[1],
 	}
 
-	addr := &Addr{}
-	if err := addr.Decode(hdr[2:8]); err != nil {
-		return nil, err
-	}
-	request.Addr = addr
+	request.Addr = &Addr{}
+	_ = request.Addr.Decode(hdr[2:8])
 
 	b, err := readCString(r, maxUseridLen)
 	if err != nil {
@@ -272,9 +269,7 @@ func ReadReply(r io.Reader) (*Reply, error) {
 	}
 
 	reply.Addr = &Addr{}
-	if err := reply.Addr.Decode(b[2:]); err != nil {
-		return nil, err
-	}
+	_ = reply.Addr.Decode(b[2:])
 
 	return reply, nil
 }
